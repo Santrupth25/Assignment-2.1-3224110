@@ -1,112 +1,146 @@
-# Assignment-2.1-Programming-for-AI-Group_init_2
+# NumCompute Stream
 
-## Group Formation
-a3236464 Sijie Fan
+NumCompute Stream extends the NumCompute toolkit so data can be processed in smaller chunks. It includes streaming preprocessing, a decision tree that retrains after collecting a set number of samples, and metrics to track performance as new data arrives.
 
-a3224110 Santrupth Shivanna
+## Main features
 
-# NumCompute
+- Read CSV files in chunks
+- Preprocess numerical and categorical features
+- Update the pipeline as new data arrives
+- Retrain the decision tree using a configurable buffer size
+- Track accuracy, precision, recall, F1, and ROC-AUC
+- Compare performance with plots and benchmark scripts
 
-NumCompute is a Python toolkit for working with numerical data using NumPy. It includes CSV loading, preprocessing, pipeline composition, statistics, metrics, sorting and searching, ranking, numerical optimisation, and other utility functions.
+## Project structure
 
-## Main Workflow
+```text
+Assignment-2.2-3224110/
+├── numcompute_stream/
+├── tests/
+├── assets/
+│   └── demo.csv
+├── demo/
+│   ├── stream_demo.ipynb
+│   └── outputs/
+├── benchmark/
+└── README.md
+```
 
-The normal workflow is:
+## Setup
 
-1. Load a CSV file with `io.py`.
-2. Select numerical and categorical columns with `ColumnSelector`.
-3. Fill missing values with `SimpleImputer`.
-4. Scale numerical columns and one-hot encode categorical columns.
-5. Use `FeatureUnion` to combine the processed columns.
-6. Optionally pass the features to a user-provided estimator through `Pipeline`.
-7. Use the other modules for statistics, evaluation, and numerical analysis as needed.
+Run these commands from the project root:
 
-### Step 1: Load the CSV file
-In the package, there are two csv read functions provided: load_csv and load_csv_chunks:
-![load_csv](assets/img1.png)
+```bash
+python -m pip install numpy matplotlib jupyter pytest
+```
 
-`load_csv` returns `(data, columns)`. `data` is a 2D NumPy string array, and `columns` contains the CSV header names. Numeric values are initially kept as strings because a regular NumPy array has one data type; they are converted in the numeric preprocessing branch.
+If a `requirements.txt` file is provided, you can install the dependencies with:
 
-![load_csv_chunks](assets/img2.png)
+```bash
+python -m pip install -r requirements.txt
+```
 
-`load_csv_chunks` return the same thing as load_csv, however, it reads data in chunks rather than reading the whole thing at once. This is typically better for larger data, since it can save memory usage.
+## Run the demo
 
-### Step 2 - 5: Create the preprocessing pipeline
+Open the notebook:
 
-Now with the CSV file loaded, the data can be passed to the pipeline for processing, but users can also choose the manully run the transformers step by step. In here, the step by step way will be demonstrated first, then the full pipeline. For this package, numerical and categorical data will be processed in separate branches of the pipeline, and combined with FeatureUnion. Users will need to specify which columns they want to be processed as numerical, and which columns they want to be processed as categorical, using the ColumnSelector transformer:
+```bash
+jupyter notebook demo/stream_demo.ipynb
+```
 
-![Column_Selector](assets/img4.png)
+The notebook reads the dataset in chunks. Each chunk is evaluated using the current model before it is used to update the pipeline. The decision tree retrains when its buffer reaches the configured size. Until the first tree is trained, predictions are unavailable.
 
-Next, data will be passed to the SimpleImputer. This is for filling the missing values in the data, and converting data to the correct types. Users need to specify the type of the data (float or str), and can specify what placeholder they want to use for replace missing:
+The plots below show examples from the streaming demo.
 
-![Simple_Imputer](assets/img5.png)
+### Buffer-size comparison
 
-Then, users can apply numeric scaling and encoding to the data. This package supports two types of scalers and one encoder: StandScaler and MinMaxScaler for numerical data, and OneHotEncoder for categorical data. For MinMaxScaler, user can also specify the range they want to scale to. 
+![Cumulative accuracy for different buffer sizes](demo/outputs/buffer_sizes_comparison.png)
 
-![Scaler_Encoder](assets/img6.png)
+The plot compares cumulative accuracy for buffer sizes 30, 60, and 90. The accuracy changes as more chunks are processed, and no single buffer size is best at every point.
 
-Users may also do the processing together using a pipeline, with the numerical and categorical pipelines combined using FeatureUnion. A full pipeline is shown as below: 
+### Accuracy and F1 over time
 
-![create_pipeline](assets/img3.png)
+![Chunk accuracy during streaming](demo/outputs/chunk_accuracy.png)
 
-### Step 6 (optional): Add a predictor
+![Cumulative F1 during streaming](demo/outputs/cumulative_f1.png)
 
-In this package, there is no predictor provided. However, the pipeline supports predictor APIs, and users may add a predictor on their own. To do so, they can add a predictor at the last step of the pipeline, and pipeline will run the fit() and predict() functions from predictor. The predictor has to contain these functions and be placed at the last step of the pipeline to work. 
+These plots show how the model's results change during streaming, rather than reporting only one final score.
 
+### Predictions and ROC view
 
-## Input and Output Notes
+![Predictions compared with ground truth](demo/outputs/predictions_vs_ground_truth.png)
 
-- The preprocessing examples expect a 2D NumPy array.
-- `load_csv()` preserves CSV values as strings; the numerical `SimpleImputer` branch converts selected values to `float`.
-- Missing numeric entries can be filled with `0`; missing categorical entries can be filled with `"Unknown"`. These are example choices, not required values for all datasets.
-- You must choose the numeric and categorical columns explicitly. The pipeline does not automatically identify feature types.
-- The column names and order for new data must match those used when fitting `ColumnSelector`.
-- `Pipeline` allows transformers in intermediate steps. A predictor, when used, belongs in the last step.
+![Streaming ROC view](demo/outputs/roc_curve.png)
 
-## Other Modules
+The prediction plot compares model outputs with the actual labels. The ROC plot gives another view of how the model separates the two classes. In this demo, the ROC view uses binary predictions, so it is a simple illustration rather than a full score-based ROC analysis.
 
-Besides data preprocessing, NumCompute also provides functions for statistics, evaluation, sorting and searching. These functions can be used independently with NumPy arrays.
+## Benchmarks
 
-### Statistics
+Run the benchmark scripts from the project root. Each script saves its results in the `benchmark/` folder.
 
-`stats.py` provides functions for calculating basic statistics, including `mean()`, `median()`, `std()`, `minimum()`, `maximum()`, `quantile()`, and `histogram()`.
+### Python loops compared with NumPy
 
-Users can pass numerical arrays to these functions to calculate statistics. `quantile()` calculates values at specified quantiles, while `histogram()` returns the counts and bin edges for a given number of bins.
+For 100,000 values, the measured results were:
 
-![stats](assets/img7.png)
+| Operation | Loop time (s) | NumPy time (s) | Speedup |
+|---|---:|---:|---:|
+| Mean | 0.008647 | 0.000042 | 203.93× |
+| Square | 0.014289 | 0.000275 | 51.92× |
+| Euclidean distance | 0.027949 | 0.000466 | 60.03× |
 
-### Metrics
+Run:
 
-`metrics.py` provides functions for evaluating prediction results, including `accuracy()`, `precision()`, `recall()`, `f1()`, `confusion_matrix()`, and `mse()`.
+```bash
+python -m benchmark.benchmarking
+```
 
-Users provide the actual values (`y_true`) and predicted values (`y_pred`) to calculate evaluation metrics. The classification metrics use binary labels (0 and 1), while MSE is used for numerical predictions.
+Output: `benchmark/benchmark_results.csv`
 
-![metrics](assets/img8.png)
+### Decision-tree best-split comparison
 
+| Samples | Loop time (ms) | Vectorised time (ms) | Speedup |
+|---:|---:|---:|---:|
+| 100 | 47.022 | 0.510 | 92.20× |
+| 500 | 430.367 | 1.142 | 376.99× |
+| 1,000 | 693.382 | 1.299 | 533.74× |
+| 2,000 | 1,754.108 | 2.205 | 795.41× |
 
-### Sorting and Searching
+In these runs, the vectorised split calculation was faster for each tested sample size.
 
-`sort_search.py` provides several sorting and searching functions, including `stable_sort()`, `quick_sort()`, `merge_sort()`, `topk()`, `top_p()`, `quickselect()`, and `binary_search()`.
+Run:
 
-Users can sort numerical arrays, find the largest or smallest values, or search for an element in sorted data. `quickselect()` uses a zero-based index, and `binary_search()` requires the input array to be sorted.
+```bash
+python -m benchmark.benchmark_tree_split
+```
 
-![sort_search](assets/img9.png)
+Output: `benchmark/tree_split_results.csv`
 
+### Buffer-size comparison
 
-## Performance Comparisons
+| Buffer size | Retrains | Total fit time (ms) | Accuracy |
+|---:|---:|---:|---:|
+| 30 | 10 | 27.643 | 0.839 |
+| 60 | 5 | 22.950 | 0.883 |
+| 120 | 2 | 14.851 | 0.917 |
 
-The package uses a benchmarking script to compare Python loops with NumPy operations for calculating a mean, squaring array elements and calculating Euclidean distance. The tests used input sizes of 100, 1,000, 10,000 and 100,000 elements, with the median of five runs used for timing.
+For this run, buffer size 120 had the highest accuracy and lowest total fit time, while retraining fewer times. Results may differ on another machine or dataset.
 
-The results showed that NumPy was faster than Python loops in all tested cases. For 100,000 elements, the results were:
+Run:
 
-![benchmarking](assets/img10.png)
+```bash
+python -m benchmark.benchmark_buffer_size
+```
 
-These results show the performance benefits of NumPy vectorisation for the selected operations.
+Output: `benchmark/buffer_size_results.csv`
 
-To reproduce the benchmark results, run:
+## Run tests
 
-python -m numcompute.benchmarking
+```bash
+python -m pytest
+```
 
-The results will also be saved in benchmark_results.csv.
+## Notes
 
-
+- Set the numerical and categorical columns explicitly in the preprocessing pipeline.
+- A larger buffer means fewer retraining events, but the model waits for more samples before updating.
+- The demo dataset is for testing the workflow. Its results should not be treated as evidence of performance on real-world data.
