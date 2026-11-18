@@ -1,6 +1,6 @@
 # Assignment_2.2 - Programming for AI (COMP5004)
 
-#### Presented By: Santrupth Shivanna - 3224110
+### Presented By: Santrupth Shivanna - 3224110
 
 # NumCompute Stream
 
