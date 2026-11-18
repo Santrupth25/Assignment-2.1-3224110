@@ -1,360 +1,381 @@
-"""
-StandardScaler, MinMaxScaler, Imputer, OneHot
-- Implement:
-  - `StandardScaler` (z-score standardization)
-  - `MinMaxScaler` (scale to a given range)
-  - `OneHotEncoder` (for categorical variables)
-  - *(Optional)* Simple imputer to replace NaN with a constant
-- API:
-  - `fit(X) -> self`
-  - `transform(X) -> X_out`
-  - `fit_transform(X) -> X_out`
-- Fully vectorized using NumPy; avoid Python loops
-- Sources:
-https://www.geeksforgeeks.org/machine-learning/standardscaler-minmaxscaler-and-robustscaler-techniques-ml/
-https://www.geeksforgeeks.org/machine-learning/ml-one-hot-encoding/
+"""NumPy preprocessing tools with batch and incremental fitting."""
 
-"""
 import numpy as np
 
+
 class ColumnSelector:
-    """
-    Let user select specific columns from the processed 2D numpy array. Used for separating numerical and categorical columns for processing
-    Parameters:
-    columns : a string list, names of all columns in the input data. (this would be returned from io result)
-    selected : a string list, names of the columns to select.
-    Attributes：
-    columns : a string list, names of all columns in the input data. (this would be returned from io result)
-    selected : a string list, names of the columns to select.
-    indices : a int list or None, Indices of selected columns, determined during fit().
-    AI Assistance: The implementation was adapted from code suggestions provided by ChatGPT (OpenAI, 2026). The code was reviewed and modified
-    to fit the package requirements.
-    """
+    """Select columns by their names and preserve their requested order."""
+
     def __init__(self, columns, selected):
-        self.columns = columns
-        self.selected = selected
+        self.columns = list(columns)
+        self.selected = list(selected)
         self.indices = None
 
     def fit(self, data):
-        """
-        Find and store the indices of selected columns.
-        Parameters:
-        data: a 2D numpy array
-        Returns；
-        self: ColumnSelector after fitted
-        Raises:
-        ValueError: if dimensions are not 2 or doesn't match with column number, or column name not found
-        """
-        if not np.ndim(data) == 2:
-            raise ValueError("dimensions must be 2")
-        if not (np.shape(data)[1] == len(self.columns)):
-            raise ValueError("dimensions do not match columns")
-        self.indices = []
-        for col in self.selected:
-            if col not in self.columns:
-                raise ValueError("column name not found")
-            self.indices.append(self.columns.index(col))
+        """Validate the input and store indices for the selected columns."""
+        data = np.asarray(data)
+        if data.ndim != 2 or data.shape[1] != len(self.columns):
+            raise ValueError("Input shape does not match column names")
+        if len(set(self.columns)) != len(self.columns):
+            raise ValueError("Column names must be unique")
+        missing = [name for name in self.selected if name not in self.columns]
+        if missing:
+            raise ValueError(f"Selected column not found: {missing[0]}")
+        self.indices = np.asarray(
+            [self.columns.index(name) for name in self.selected], dtype=int
+        )
         return self
 
     def transform(self, data):
-        """
-        Extract selected columns from input array
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a numpy array containing the selected columns
-        Raises:
-        ValueError: if dimensions are not 2 or doesn't match with column number, or transformed without fitting
-        """
-        if not np.ndim(data) == 2:
-            raise ValueError("dimensions must be 2")
-        if not (np.shape(data)[1] == len(self.columns)):
-            raise ValueError("dimensions do not match columns")
+        """Return the selected columns from a fitted selector."""
+        data = np.asarray(data)
+        if data.ndim != 2 or data.shape[1] != len(self.columns):
+            raise ValueError("Input shape does not match column names")
         if self.indices is None:
             raise ValueError("ColumnSelector must be fitted first")
         return data[:, self.indices]
 
     def fit_transform(self, data):
-        """
-        Combine fitting and transforming together
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a numpy array containing the selected columns
-        Raises:
-        same as in fit and transform
-        """
-        self.fit(data)
-        return self.transform(data)
+        """Fit the selector and select columns in one call."""
+        return self.fit(data).transform(data)
+
 
 class SimpleImputer:
-    """
-    Process columns and filled missing values, and transform to float array in needed.
+    """Fill missing values with a constant or an incrementally learned mean."""
 
-    Parameters:
-    fill_value: value used to fill missing, default 0
-    dtype: type of the data (string or float). Used to determine what type the array should be
-    Attributes:
-    fill_value: value used to fill missing, default 0
-    dtype: type of the data (string or float). Used to determine what type the array should be
-    AI Assistance: The implementation was adapted from code suggestions provided by ChatGPT (OpenAI, 2026). The code was reviewed and modified
-    to fit the package requirements.
-    """
-    def __init__(self, fill_value=0, dtype=float):
+    def __init__(self, fill_value=0, dtype=float, strategy="constant"):
+        if dtype not in (float, str):
+            raise ValueError("dtype must be float or str")
+        if strategy not in ("constant", "mean"):
+            raise ValueError("strategy must be 'constant' or 'mean'")
+        if strategy == "mean" and dtype is not float:
+            raise ValueError("Mean imputation requires dtype=float")
+
         self.fill_value = fill_value
         self.dtype = dtype
+        self.strategy = strategy
+        self.n_features_in_ = None
+        self.count = None
+        self.total = None
+        self.fill_values = None
 
-    def fit(self, data):
-        """
-        Do not really do anything, only to fit API
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        self: SimpleImputer after fitted
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
+    @staticmethod
+    def _missing_mask(data):
+        """Identify common missing-value markers in mixed input arrays."""
+        strings = np.char.strip(np.asarray(data, dtype=str))
+        lower = np.char.lower(strings)
+        return (
+            (strings == "")
+            | (lower == "nan")
+            | (lower == "none")
+            | (lower == "null")
+        )
+
+    def partial_fit(self, data):
+        """Update learned imputation values from another chunk of rows."""
+        data = np.asarray(data)
+        if data.ndim != 2 or data.shape[0] == 0:
+            raise ValueError("Input must be a non-empty 2D array")
+
+        if self.n_features_in_ is None:
+            self.n_features_in_ = data.shape[1]
+        elif data.shape[1] != self.n_features_in_:
+            raise ValueError("Number of columns changed")
+
+        if self.strategy == "constant":
+            return self
+
+        strings = np.asarray(data, dtype=str)
+        missing = self._missing_mask(data)
+        numeric = np.full(data.shape, np.nan, dtype=float)
+        valid = ~missing
+        try:
+            numeric[valid] = strings[valid].astype(float)
+        except ValueError as exc:
+            raise ValueError("Mean imputation requires numeric data") from exc
+        valid &= np.isfinite(numeric)
+
+        chunk_count = np.sum(valid, axis=0)
+        chunk_total = np.sum(np.where(valid, numeric, 0.0), axis=0)
+        if self.count is None:
+            self.count = chunk_count.astype(np.int64)
+            self.total = chunk_total.astype(float)
+        else:
+            self.count += chunk_count
+            self.total += chunk_total
+
+        fallback = float(self.fill_value)
+        self.fill_values = np.divide(
+            self.total,
+            self.count,
+            out=np.full(self.n_features_in_, fallback, dtype=float),
+            where=self.count > 0,
+        )
         return self
 
+    def fit(self, data):
+        """Reset and learn fill values from the supplied dataset."""
+        self.n_features_in_ = None
+        self.count = None
+        self.total = None
+        self.fill_values = None
+        return self.partial_fit(data)
+
     def transform(self, data):
-        """
-        Fill the array with fill values, and convert to the correct data type for further processing
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed numpy array with filled values and correct data type
-        Raises:
-        ValueError: if dimensions are not 2, type is not float or string
-        """
-        if np.ndim(data) != 2:
+        """Replace missing values and return either a float or string array."""
+        data = np.asarray(data)
+        if data.ndim != 2:
             raise ValueError("Input must be 2D")
+        if self.n_features_in_ is not None and data.shape[1] != self.n_features_in_:
+            raise ValueError("Number of columns changed")
 
-        data = np.asarray(data, dtype=str)
-        cleaned = np.char.strip(data)
-        missing = (cleaned == "") | (np.char.lower(cleaned) == "nan")
+        strings = np.asarray(data, dtype=str)
+        missing = self._missing_mask(data)
 
-        if self.dtype == float:
-            fill = float(self.fill_value)
-            numeric = np.where(missing, "nan", data).astype(float)
-            return np.where(np.isnan(numeric), fill, numeric)
+        if self.dtype is str:
+            return np.where(missing, str(self.fill_value), strings)
 
-        elif self.dtype == str:
-            return np.where(missing, str(self.fill_value), data)
+        numeric = np.full(data.shape, np.nan, dtype=float)
+        valid = ~missing
+        try:
+            numeric[valid] = strings[valid].astype(float)
+        except ValueError as exc:
+            raise ValueError("Input contains non-numeric values") from exc
+        numeric[~np.isfinite(numeric)] = np.nan
 
+        if self.strategy == "mean":
+            if self.fill_values is None:
+                raise ValueError("Fit the imputer before mean transformation")
+            fills = self.fill_values
         else:
-            raise ValueError("dtype must be float or str")
+            try:
+                fill = float(self.fill_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Numeric imputation needs a numeric fill_value") from exc
+            fills = np.full(data.shape[1], fill, dtype=float)
+
+        return np.where(np.isnan(numeric), fills, numeric)
 
     def fit_transform(self, data):
-        """
-        Combine fitting and transforming together
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed numpy array with filled values and correct data type
-        Raises:
-        same as in fit and transform
-        """
-        self.fit(data)
-        return self.transform(data)
+        """Fit the imputer and transform the same dataset."""
+        return self.fit(data).transform(data)
+
 
 class StandardScaler:
-    """
-    Process numeric columns and standardize with z-score scaler
-
-    Parameters:
-    none
-    Attributes
-    mean: a numpy array, containing the mean of each column
-    std: a numpy array, containing the standard deviation of each column
-    """
+    """Standardise numeric columns using incrementally merged statistics."""
 
     def __init__(self):
         self.mean = None
         self.std = None
+        self.var = None
+        self.n_features_in_ = None
+        self._count = None
+        self._mean = None
+        self._M2 = None
 
-    def fit(self, data):
-        """
-        Calculate and store the mean and standard deviation of each column
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        self: a fitted StandScaler
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
-        self.mean = np.mean(data, axis = 0)
-        self.std = np.std(data, axis = 0)
+    def partial_fit(self, data):
+        """Update per-column means and variances from a new data chunk."""
+        data = np.asarray(data, dtype=float)
+        if data.ndim != 2 or data.shape[0] == 0:
+            raise ValueError("Input must be a non-empty 2D array")
+        if np.isinf(data).any():
+            raise ValueError("Input cannot contain infinity")
+
+        if self.n_features_in_ is None:
+            self.n_features_in_ = data.shape[1]
+            self._count = np.zeros(data.shape[1], dtype=np.int64)
+            self._mean = np.zeros(data.shape[1], dtype=float)
+            self._M2 = np.zeros(data.shape[1], dtype=float)
+        elif data.shape[1] != self.n_features_in_:
+            raise ValueError("Number of columns changed")
+
+        valid = np.isfinite(data)
+        chunk_count = np.sum(valid, axis=0).astype(np.int64)
+        chunk_sum = np.sum(np.where(valid, data, 0.0), axis=0)
+        chunk_mean = np.divide(
+            chunk_sum,
+            chunk_count,
+            out=np.zeros(data.shape[1], dtype=float),
+            where=chunk_count > 0,
+        )
+        centered = np.where(valid, data - chunk_mean, 0.0)
+        chunk_M2 = np.sum(centered**2, axis=0)
+
+        old_count = self._count.copy()
+        total_count = old_count + chunk_count
+        delta = chunk_mean - self._mean
+        correction = np.divide(
+            delta**2 * old_count * chunk_count,
+            total_count,
+            out=np.zeros(data.shape[1], dtype=float),
+            where=total_count > 0,
+        )
+        self._M2 += chunk_M2 + correction
+        self._mean += np.divide(
+            delta * chunk_count,
+            total_count,
+            out=np.zeros(data.shape[1], dtype=float),
+            where=total_count > 0,
+        )
+        self._count = total_count
+        self._refresh_stats()
         return self
 
+    def _refresh_stats(self):
+        """Refresh the public mean, variance, and standard deviation arrays."""
+        self.mean = np.where(self._count > 0, self._mean, np.nan)
+        self.var = np.divide(
+            self._M2,
+            self._count,
+            out=np.full(self.n_features_in_, np.nan, dtype=float),
+            where=self._count > 0,
+        )
+        self.std = np.sqrt(self.var)
+
+    def fit(self, data):
+        """Reset the scaler and fit it to a complete dataset."""
+        self.__init__()
+        return self.partial_fit(data)
+
     def transform(self, data):
-        """
-        standardize the input data using the mean and standard deviation
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed 2D numpy array with standardized values
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
-        std = np.where(self.std == 0, 1, self.std)
-        transformed = (data - self.mean) / std
-        return transformed
+        """Standardise columns using the fitted means and standard deviations."""
+        data = np.asarray(data, dtype=float)
+        if self.mean is None:
+            raise ValueError("StandardScaler must be fitted first")
+        if data.ndim != 2 or data.shape[1] != self.n_features_in_:
+            raise ValueError("Input shape does not match fitted data")
+        if np.isinf(data).any():
+            raise ValueError("Input cannot contain infinity")
+        safe_std = np.where(self.std == 0, 1.0, self.std)
+        return (data - self.mean) / safe_std
 
     def fit_transform(self, data):
-        """
-        Combine fitting and transforming together
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed 2D numpy array with standardized values
-        Raises:
-        same as in fit and transform
-        """
-        self.fit(data)
-        return self.transform(data)
-
-
+        """Fit the scaler and standardise the same dataset."""
+        return self.fit(data).transform(data)
 
 
 class MinMaxScaler:
-    """
-    Process numeric columns and standardize to a given range
+    """Scale numeric columns to a configured range, supporting chunk updates."""
 
-    Parameters:
-    lower: lower bound of the standardized range, default 0
-    upper: upper bound of the standardized range, default 1
-    Attributes
-    min: a numpy array, containing the minimum of each column
-    max: a numpy array, containing the maximum of each column
-    lower: lower bound of the standardized range, default 0
-    upper: upper bound of the standardized range, default 1
-    """
-
-    def __init__(self, lower = 0, upper = 1):
+    def __init__(self, lower=0, upper=1):
         if lower >= upper:
-           raise ValueError("lower must be smaller than upper")
-        self.min = None
-        self.max = None
+            raise ValueError("lower must be smaller than upper")
         self.lower = lower
         self.upper = upper
+        self.min = None
+        self.max = None
+        self.n_features_in_ = None
+        self._min = None
+        self._max = None
+        self._seen = None
 
-    def fit(self, data):
-        """
-        Calculate and store the min and max of each column
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        self: a fitted MinMaxScaler
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
-        self.min = np.min(data, axis = 0)
-        self.max = np.max(data, axis = 0)
+    def partial_fit(self, data):
+        """Update per-column minimum and maximum from a new chunk."""
+        data = np.asarray(data, dtype=float)
+        if data.ndim != 2 or data.shape[0] == 0:
+            raise ValueError("Input must be a non-empty 2D array")
+        if np.isinf(data).any():
+            raise ValueError("Input cannot contain infinity")
+
+        if self.n_features_in_ is None:
+            self.n_features_in_ = data.shape[1]
+            self._min = np.full(data.shape[1], np.inf)
+            self._max = np.full(data.shape[1], -np.inf)
+            self._seen = np.zeros(data.shape[1], dtype=bool)
+        elif data.shape[1] != self.n_features_in_:
+            raise ValueError("Number of columns changed")
+
+        valid = np.isfinite(data)
+        has_values = np.any(valid, axis=0)
+        chunk_min = np.min(np.where(valid, data, np.inf), axis=0)
+        chunk_max = np.max(np.where(valid, data, -np.inf), axis=0)
+        update = has_values & self._seen
+        first = has_values & ~self._seen
+        self._min[update] = np.minimum(self._min[update], chunk_min[update])
+        self._max[update] = np.maximum(self._max[update], chunk_max[update])
+        self._min[first] = chunk_min[first]
+        self._max[first] = chunk_max[first]
+        self._seen |= has_values
+        self.min = np.where(self._seen, self._min, np.nan)
+        self.max = np.where(self._seen, self._max, np.nan)
         return self
 
+    def fit(self, data):
+        """Reset the scaler and calculate bounds from a complete dataset."""
+        self.min = None
+        self.max = None
+        self.n_features_in_ = None
+        self._min = None
+        self._max = None
+        self._seen = None
+        return self.partial_fit(data)
+
     def transform(self, data):
-        """
-        standardize the input data using the min and max in the given range
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed 2D numpy array with standardized values
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
-        data_range = self.max - self.min
-        data_range = np.where(data_range == 0, 1, data_range)
-        transformed = (data - self.min) / data_range
-        transformed = transformed * (self.upper - self.lower) + self.lower
-        return transformed
+        """Scale columns into the configured range using fitted bounds."""
+        data = np.asarray(data, dtype=float)
+        if self.min is None:
+            raise ValueError("MinMaxScaler must be fitted first")
+        if data.ndim != 2 or data.shape[1] != self.n_features_in_:
+            raise ValueError("Input shape does not match fitted data")
+        if np.isinf(data).any():
+            raise ValueError("Input cannot contain infinity")
+        span = self.max - self.min
+        safe_span = np.where(span == 0, 1.0, span)
+        scaled = (data - self.min) / safe_span
+        return scaled * (self.upper - self.lower) + self.lower
 
     def fit_transform(self, data):
-        """
-        Combine fitting and transforming together
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a transformed 2D numpy array with standardized values
-        Raises:
-        same as in fit and transform
-        """
-        self.fit(data)
-        return self.transform(data)
-
+        """Fit the scaler and scale the same dataset."""
+        return self.fit(data).transform(data)
 
 
 class OneHotEncoder:
-    """
-    Convert categorical data into numerical data using one-hot encoding.
+    """Encode categorical columns and allow categories to grow across chunks."""
 
-    Parameters:
-    none
-    Attributes
-    categories : a list of numpy arrays, containing unique categories of each column.
-    """
     def __init__(self):
         self.categories = None
-   
+        self.n_features_in_ = None
 
-    def fit(self, data):
-        """
-        Find and store the unique categories of each column
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        self: a fitted OneHotEncoder
-        Raises:
-        ValueError: if dimensions are not 2 
-        """
-        if np.ndim(data) != 2:
-            raise ValueError("Input must be 2D")
-        self.categories = []
-        for i in range(data.shape[1]):
-            self.categories.append(np.unique(data[:, i]))
+    def partial_fit(self, data):
+        """Add categories from a chunk while retaining previously learned ones."""
+        data = np.asarray(data)
+        if data.ndim != 2 or data.shape[0] == 0:
+            raise ValueError("Input must be a non-empty 2D array")
+
+        if self.n_features_in_ is None:
+            self.n_features_in_ = data.shape[1]
+            self.categories = [np.unique(data[:, i]) for i in range(data.shape[1])]
+        else:
+            if data.shape[1] != self.n_features_in_:
+                raise ValueError("Number of columns changed")
+            self.categories = [
+                np.union1d(old, np.unique(data[:, i]))
+                for i, old in enumerate(self.categories)
+            ]
         return self
 
+    def fit(self, data):
+        """Reset the encoder and learn categories from a complete dataset."""
+        self.categories = None
+        self.n_features_in_ = None
+        return self.partial_fit(data)
+
     def transform(self, data):
-        """
-        Convert categorical columns into one-hot encoded numerical arrays, then the encoded columns are combined into a single 2D array.
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a 2d int array with shape (n_samples, n_features), each value is either 0 or 1.
-        Raises:
-        ValueError: if dimensions are not 2 or input shape do not match, or encoder is not fitted
-        """
+        """Return binary indicator columns using the learned category order."""
+        data = np.asarray(data)
         if self.categories is None:
             raise ValueError("OneHotEncoder must be fitted first")
-        if np.ndim(data) != 2 or data.shape[1] != len(self.categories):
+        if data.ndim != 2 or data.shape[1] != self.n_features_in_:
             raise ValueError("Input shape does not match fitted data")
 
-        results = []
-
-        for i, categories in enumerate(self.categories):
-            encoded = (data[:, [i]] == categories).astype(int)
-            results.append(encoded)
-        return np.hstack(results)
+        parts = [
+            (data[:, i, None] == categories[None, :]).astype(int)
+            for i, categories in enumerate(self.categories)
+        ]
+        if not parts:
+            return np.empty((data.shape[0], 0), dtype=int)
+        return np.hstack(parts)
 
     def fit_transform(self, data):
-        """
-        Combine fitting and transforming together
-        Parameters:
-        data: a 2D numpy array
-        Returns:
-        a 2d int array with shape (n_samples, n_features), each value is either 0 or 1.
-        Raises:
-        same as in fit and transform
-        """
-        self.fit(data)
-        return self.transform(data)
-
+        """Fit the encoder and encode the same dataset."""
+        return self.fit(data).transform(data)
