@@ -1,6 +1,10 @@
+# Assignment_2.2 - Programming for AI (COMP5004)
+
+#### Presented By: Santrupth Shivanna - 3224110
+
 # NumCompute Stream
 
-NumCompute Stream extends the NumCompute toolkit so data can be processed in smaller chunks. It includes streaming preprocessing, a decision tree that retrains after collecting a set number of samples, and metrics to track performance as new data arrives.
+NumCompute Stream extends on our NumCompute toolkit from previous Assignment. In this assignment, it includes streaming preprocessing, a decision tree that retrains after collecting a set number of samples, metrics to track performance as new data arrives and some visualization plots. And the dataset used is synthetic and is only used to demonstrate the package.
 
 ## Main features
 
@@ -8,8 +12,8 @@ NumCompute Stream extends the NumCompute toolkit so data can be processed in sma
 - Preprocess numerical and categorical features
 - Update the pipeline as new data arrives
 - Retrain the decision tree using a configurable buffer size
-- Track accuracy, precision, recall, F1, and ROC-AUC
-- Compare performance with plots and benchmark scripts
+- Track accuracy, precision, recall, F1 and ROC-AUC
+- Compare performance with different plots and benchmark scripts
 
 ## Project structure
 
@@ -138,9 +142,3 @@ Output: `benchmark/buffer_size_results.csv`
 ```bash
 python -m pytest
 ```
-
-## Notes
-
-- Set the numerical and categorical columns explicitly in the preprocessing pipeline.
-- A larger buffer means fewer retraining events, but the model waits for more samples before updating.
-- The demo dataset is for testing the workflow. Its results should not be treated as evidence of performance on real-world data.
