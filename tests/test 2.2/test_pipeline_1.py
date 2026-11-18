@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from numcompute.pipeline import Pipeline, FeatureUnion
-from numcompute.preprocessing import StandardScaler, MinMaxScaler
+from numcompute_stream.pipeline import Pipeline, FeatureUnion
+from numcompute_stream.preprocessing import StandardScaler, MinMaxScaler
 
 
 class SimpleModel:

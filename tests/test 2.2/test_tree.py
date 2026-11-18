@@ -1,7 +1,7 @@
 
 import numpy as np
 
-from numcompute.tree import DecisionTreeClassifier
+from numcompute_stream.tree import DecisionTreeClassifier
 
 
 def test_tree_learns_simple_classes():

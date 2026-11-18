@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from numcompute.stream import StreamTrainer
-from numcompute.tree import DecisionTreeClassifier
+from numcompute_stream.stream import StreamTrainer
+from numcompute_stream.tree import DecisionTreeClassifier
 
 
 class TreePipeline:

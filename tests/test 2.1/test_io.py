@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from pathlib import Path
 
-from numcompute.io import load_csv, load_csv_chunks
+from numcompute_stream.io import load_csv, load_csv_chunks
 
 
 # Locate the project root, regardless of where pytest is run.

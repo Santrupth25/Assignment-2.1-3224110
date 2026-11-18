@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from numcompute.metrics import StreamingMetrics
+from numcompute_stream.metrics import StreamingMetrics
 
 
 def test_metrics_initialisation():

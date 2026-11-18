@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from numcompute.metrics import auc, roc_curve, StreamingMetrics
+from numcompute_stream.metrics import auc, roc_curve, StreamingMetrics
 
 
 def test_auc_perfect_curve():

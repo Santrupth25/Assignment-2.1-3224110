@@ -4,7 +4,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from numcompute.visualize import (
+from numcompute_stream.visualize import (
     plot_metric_over_time,
     compare_models,
     plot_predictions_vs_ground_truth,
