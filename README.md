@@ -58,21 +58,21 @@ The plots below show examples from the streaming demo.
 
 ### Buffer-size comparison
 
-![Cumulative accuracy for different buffer sizes](demo/outputs/buffer_sizes_comparison.png)
+![Cumulative accuracy for different buffer sizes](demo/outputs/cumulative_accuracy_buffer_sizes_comparison.png)
 
-The plot compares cumulative accuracy for buffer sizes 30, 60, and 90. The accuracy changes as more chunks are processed, and no single buffer size is best at every point.
+The plot compares cumulative accuracy for buffer sizes 30, 60 and 90. The accuracy changes as more chunks are processed, and no single buffer size is best at every point.
 
 ### Accuracy and F1 over time
 
-![Chunk accuracy during streaming](demo/outputs/chunk_accuracy.png)
+![Chunk accuracy during streaming](demo/outputs/chunk_accuracy_streaming.png)
 
-![Cumulative F1 during streaming](demo/outputs/cumulative_f1.png)
+![Cumulative F1 during streaming](demo/outputs/cumulative_f1_streaming.png)
 
 These plots show how the model's results change during streaming, rather than reporting only one final score.
 
 ### Predictions and ROC view
 
-![Predictions compared with ground truth](demo/outputs/predictions_vs_ground_truth.png)
+![Predictions compared with ground truth](demo/outputs/predictions vs actual.png)
 
 ![Streaming ROC view](demo/outputs/roc_curve.png)
 
